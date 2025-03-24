@@ -15,7 +15,10 @@ const YT_COLUMN_TARGET = core.getInput("yt-column-target");
 const YT_ISSUE = "api/issues/";
 const REPO_URL = `https://github.com/${github.context.issue.owner}/${github.context.issue.repo}`;
 const PR_URL = `https://github.com/${github.context.issue.owner}/${github.context.issue.repo}/pull/${github.context.issue.number}`;
-const ISSUE_REGEX = new RegExp(`${YT_PROJECT_ID}-[0-9]+`, "g");
+
+// Updated regex to match both canonical and non-canonical ticket formats in the PR title and description.
+// It matches the project key (case-insensitive) optionally followed by a hyphen or space, then the ticket number.
+const TICKET_REGEX = new RegExp(`(${YT_PROJECT_ID})[ -]?([0-9]+)`, "gi");
 
 const ytApi = axios.create({
   headers: {
@@ -34,7 +37,7 @@ async function run() {
     const tickets = await getMatchingTickets();
 
     if (tickets.length === 0) {
-      console.log("PR description does not contain any issue ID");
+      console.log("PR description and title do not contain any issue ID");
       return;
     }
 
@@ -94,16 +97,17 @@ async function getPrDescription() {
     pull_number: github.context.issue.number
   });
 
-  return data.body;
+  return data.body || "";
 }
 
 async function getMatchingTickets() {
-  console.log(`Checking ${ISSUE_REGEX} against the PR description`);
-
+  console.log(`Checking PR description and title against the ticket regex`);
   const description = await getPrDescription();
-  const matches = [...description.matchAll(ISSUE_REGEX)];
-
-  return [...new Set(matches.map(x => x[0]))];
+  const title = (github.context.payload.pull_request && github.context.payload.pull_request.title) || "";
+  const textToSearch = description + "\n" + title;
+  const matches = [...textToSearch.matchAll(TICKET_REGEX)];
+  // Normalize matches: uppercase project key and ensure hyphen separator.
+  return [...new Set(matches.map(match => `${match[1].toUpperCase()}-${match[2]}`))];
 }
 
 async function checkIssueExist(issueId) {
